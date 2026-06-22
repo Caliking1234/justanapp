@@ -398,7 +398,7 @@ function Letter() {
         >
           {[
             "No matter what happens, I wanted to say this properly.",
-            "Thank you for being part of my life.",
+            // "Thank you for being part of my life.",
             "You matter to me.",
             "And I truly am sorry.",
           ].map((l, i) => (
@@ -573,16 +573,14 @@ export default function ApologyApp() {
   ];
   const memoryFallback = [
     "Your kindness.",
-    "The way you always support people.",
+    "The way you always listen to me",
     "The conversations we shared.",
-    "The memories we created.",
-    "The happiness you brought into my life.",
+    "The crazy you offer",
+    "The way you make me laugh",
   ];
   const timeline = [
-    "The day we met",
-    "Our favorite memory",
-    "The funniest moment",
-    "A difficult moment we overcame",
+    "The day we started talking",
+    "A difficult moment we overcame(this one if we do)",
     "Today",
   ];
   const changes = [
