@@ -1,1021 +1,882 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+/**
+ * CoffeeAskOut.jsx
+ * A short, ultra-premium single-page ask-out, built for iPhone Safari (430px, notch-safe).
+ *
+ * Stack: React + Framer Motion. Styling is inline (no Tailwind config required) — swap to
+ * Tailwind classes freely if you prefer. Just `npm i framer-motion` and render <CoffeeAskOut />.
+ *
+ * Flow: Opening (cinematic dark) -> Tulips (ivory bloom) -> The Ask (bouquet + glass buttons,
+ * with a "Convince me" path that reveals quips + alternate date ideas) -> Ending (golden petals,
+ * one heartbeat). Tap anywhere to advance the first two scenes; buttons drive the rest.
+ */
 
-/*
-  Apology — tuned for iPhone 17 (6.3" ProMotion 120Hz, Dynamic Island).
-  - All motion uses translate3d / scale (GPU compositor) — never animates layout props.
-  - will-change hints on animated layers so Safari promotes them to their own layer.
-  - safe-area-inset padding so nothing hides under the Dynamic Island / home bar.
-  - Tap feedback (:active scale) replaces hover, which doesn't exist on touch.
-  - -webkit-overflow-scrolling: touch + overscroll containment for native momentum feel.
-  - Particle/star counts kept lean so 120fps holds even with backdrop-blur.
-*/
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useSpring,
+} from "framer-motion";
 
-function useGlobalStyles() {
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap";
-    document.head.appendChild(link);
+const EASE = [0.22, 1, 0.36, 1];
 
-    const style = document.createElement("style");
-    style.textContent = `
-      :root{
-        --safe-t: env(safe-area-inset-top, 0px);
-        --safe-b: env(safe-area-inset-bottom, 0px);
-        --safe-l: env(safe-area-inset-left, 0px);
-        --safe-r: env(safe-area-inset-right, 0px);
-      }
-      *{ -webkit-tap-highlight-color: transparent; }
-      html,body{ margin:0; background:#0F172A; overscroll-behavior-y:none; }
-      html{ scroll-behavior:smooth; -webkit-text-size-adjust:100%; }
+// Art-directed palette (intentional dark -> ivory bloom; not system-dark-driven)
+const PALETTE = {
+  opening: {
+    bg: "radial-gradient(125% 120% at 50% 28%, #1d1613 0%, #0c0908 72%)",
+    ink: "#f1ebe3",
+    soft: "#b3a698",
+    accent: "#e7c98f",
+  },
+  tulips: {
+    bg: "radial-gradient(125% 120% at 50% 30%, #fdf4ea 0%, #f6e4d9 100%)",
+    ink: "#4a382f",
+    soft: "#8c7163",
+    accent: "#bb4659",
+  },
+  ask: {
+    bg: "radial-gradient(120% 100% at 50% 22%, #fffdf9 0%, #f7f0e6 100%)",
+    ink: "#3c2d27",
+    soft: "#8a7264",
+    accent: "#2f5742",
+  },
+  ending: {
+    bg: "radial-gradient(125% 120% at 50% 38%, #fff7e6 0%, #f6e9d2 100%)",
+    ink: "#4a3a2a",
+    soft: "#9a8468",
+    accent: "#c79a4e",
+  },
+};
 
-      /* GPU-friendly keyframes: only transform + opacity */
-      @keyframes floatUp { 0%{transform:translate3d(0,0,0)} 50%{transform:translate3d(0,-12px,0)} 100%{transform:translate3d(0,0,0)} }
-      @keyframes heartbeat { 0%,100%{transform:scale(1)} 14%{transform:scale(1.13)} 28%{transform:scale(1)} 42%{transform:scale(1.09)} 70%{transform:scale(1)} }
-      @keyframes driftA { from{transform:translate3d(0,0,0)} to{transform:translate3d(50px,-34px,0)} }
-      @keyframes driftB { from{transform:translate3d(0,0,0)} to{transform:translate3d(-44px,44px,0)} }
-      @keyframes twinkle { 0%,100%{opacity:.2} 50%{opacity:1} }
-      @keyframes particleRise { 0%{transform:translate3d(0,0,0) scale(1);opacity:0} 10%{opacity:.7} 90%{opacity:.45} 100%{transform:translate3d(0,-105vh,0) scale(.6);opacity:0} }
-      @keyframes heartRise { 0%{transform:translate3d(0,0,0) scale(.6);opacity:0} 15%{opacity:1} 100%{transform:translate3d(0,-78vh,0) scale(1.1);opacity:0} }
-      @keyframes dash { to{stroke-dashoffset:0} }
+const KEYFRAMES = `
+@keyframes petalDrift{0%{transform:translate(0,0) rotate(0deg)}20%{transform:translate(26px,22vh) rotate(70deg)}45%{transform:translate(-18px,48vh) rotate(150deg)}70%{transform:translate(22px,78vh) rotate(245deg)}100%{transform:translate(-10px,128vh) rotate(330deg)}}
+@keyframes mote{0%,100%{transform:translate(0,0);opacity:.18}50%{transform:translate(9px,-16px);opacity:.55}}
+@keyframes orbFloat{0%{transform:translate(0,0) scale(1)}50%{transform:translate(22px,-26px) scale(1.08)}100%{transform:translate(0,0) scale(1)}}
+@keyframes corePulse{0%,100%{transform:scale(1);opacity:.8}50%{transform:scale(1.35);opacity:1}}
+@keyframes hintBob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+@keyframes floatBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@media (prefers-reduced-motion: reduce){.cao-petal,.cao-mote,.cao-orb{animation:none!important;opacity:.35!important}}
+`;
 
-      @media (prefers-reduced-motion: reduce){
-        *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
-        .reveal{opacity:1!important;transform:none!important}
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(link);
-      document.head.removeChild(style);
+const GRAIN =
+  "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>\")";
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const PCOLS = [
+  ["#ecaeb6", "#b23a52"],
+  ["#e29aa6", "#a8324c"],
+  ["#f0c2c9", "#c14d5f"],
+  ["#d97f8c", "#8f2c44"],
+  ["#edb6a8", "#bf5a4e"],
+];
+
+function makePetals(n, fast) {
+  return Array.from({ length: n }, () => {
+    const c = pick(PCOLS);
+    const size = rand(11, 22);
+    const dur = fast ? rand(5.5, 9.5) : rand(12, 21);
+    return {
+      position: "absolute",
+      top: "-14vh",
+      left: rand(-6, 100) + "%",
+      width: size + "px",
+      height: size * 1.55 + "px",
+      background: `linear-gradient(155deg, ${c[0]}, ${c[1]})`,
+      borderRadius: "52% 52% 50% 50% / 66% 66% 34% 34%",
+      boxShadow: "0 8px 16px rgba(150,55,75,.16)",
+      opacity: rand(0.5, 0.88),
+      transformOrigin: "center",
+      animation: `petalDrift ${dur.toFixed(2)}s linear ${(-rand(0, dur)).toFixed(2)}s infinite`,
+      willChange: "transform",
     };
-  }, []);
+  });
 }
 
-function useReveal() {
-  const ref = useRef(null);
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ob = new IntersectionObserver(
-      ([e]) => e.isIntersecting && (setShown(true), ob.disconnect()),
-      // rootMargin lifts the trigger above the home bar so reveals fire a touch early
-      { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
-    );
-    ob.observe(el);
-    return () => ob.disconnect();
-  }, []);
-  return [ref, shown];
-}
+const groupV = (delay, stagger) => ({
+  hidden: {},
+  show: { transition: { delayChildren: delay, staggerChildren: stagger } },
+});
+const itemV = {
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0, transition: { duration: 1.4, ease: EASE } },
+};
 
-function Reveal({
+const buzz = (p) => {
+  if (navigator.vibrate) navigator.vibrate(p);
+};
+
+// ---- Magnetic, press-scaling glass button ----------------------------------
+function MagneticButton({
   children,
-  delay = 0,
-  y = 26,
-  as: Tag = "div",
-  className = "",
-  style = {},
+  onClick,
+  style,
+  hidden,
+  sheenOpacity = 0.5,
 }) {
-  const [ref, shown] = useReveal();
+  const ref = useRef(null);
+  const mx = useMotionValue(0),
+    my = useMotionValue(0);
+  const x = useSpring(mx, { stiffness: 220, damping: 18, mass: 0.4 });
+  const y = useSpring(my, { stiffness: 220, damping: 18, mass: 0.4 });
+  useEffect(() => {
+    const onMove = (e) => {
+      const el = ref.current;
+      if (!el || hidden) return;
+      const r = el.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height / 2);
+      const dist = Math.hypot(dx, dy);
+      if (dist < 120) {
+        const f = (1 - dist / 120) * 0.3;
+        mx.set(dx * f);
+        my.set(dy * f);
+      } else {
+        mx.set(0);
+        my.set(0);
+      }
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [mx, my, hidden]);
   return (
-    <Tag
+    <motion.button
       ref={ref}
-      className={`reveal ${className}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick && onClick(e);
+      }}
+      whileTap={{ scale: 0.94 }}
+      animate={hidden ? { opacity: 0, scale: 0.9 } : { opacity: 1, scale: 1 }}
+      transition={{ duration: 0.5, ease: EASE }}
       style={{
-        opacity: shown ? 1 : 0,
-        transform: shown ? "translate3d(0,0,0)" : `translate3d(0,${y}px,0)`,
-        transition: `opacity .8s cubic-bezier(.22,1,.36,1) ${delay}s, transform .8s cubic-bezier(.22,1,.36,1) ${delay}s`,
-        willChange: shown ? "auto" : "transform, opacity",
+        x,
+        y,
+        appearance: "none",
+        cursor: "pointer",
+        position: "relative",
+        overflow: "hidden",
+        pointerEvents: hidden ? "none" : "auto",
+        fontFamily: "'Jost',sans-serif",
         ...style,
       }}
     >
-      {children}
-    </Tag>
+      <span
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: "48%",
+          background: `linear-gradient(180deg,rgba(255,255,255,${sheenOpacity}),transparent)`,
+          pointerEvents: "none",
+        }}
+      />
+      <span style={{ position: "relative" }}>{children}</span>
+    </motion.button>
   );
 }
 
-const C = {
-  bg: "#0F172A",
-  bg2: "#1E293B",
-  accent: "#60A5FA",
-  pink: "#F9A8D4",
-  text: "#FFFFFF",
-  sub: "#CBD5E1",
-};
-
-const glass = {
-  background: "rgba(30,41,59,0.45)",
-  backdropFilter: "blur(14px)",
-  WebkitBackdropFilter: "blur(14px)",
-  border: "1px solid rgba(148,163,184,0.18)",
-  borderRadius: 22,
-};
-
-// Detect coarse pointer (touch) once, so we can skip hover-only behaviour cleanly.
-function useTouch() {
-  const [touch, setTouch] = useState(false);
+// ---- Pointer-reactive petal field ------------------------------------------
+function PetalField({ petals }) {
+  const mx = useMotionValue(0),
+    my = useMotionValue(0);
+  const x = useSpring(mx, { stiffness: 60, damping: 20 });
+  const y = useSpring(my, { stiffness: 60, damping: 20 });
   useEffect(() => {
-    setTouch(window.matchMedia("(pointer: coarse)").matches);
-  }, []);
-  return touch;
+    const onMove = (e) => {
+      mx.set(-(e.clientX / window.innerWidth - 0.5) * 22);
+      my.set(-(e.clientY / window.innerHeight - 0.5) * 16);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [mx, my]);
+  return (
+    <motion.div
+      style={{ position: "absolute", inset: 0, x, y, pointerEvents: "none" }}
+    >
+      {petals.map((s, i) => (
+        <div key={i} className="cao-petal" style={s} />
+      ))}
+    </motion.div>
+  );
 }
 
-function Ambient() {
-  // Leaner counts for mobile so blur + compositing stay at 120fps.
-  const particles = React.useMemo(
+// ---- Reusable bits ----------------------------------------------------------
+const sceneWrap = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  textAlign: "center",
+  padding: "0 34px",
+};
+
+const Hint = () => (
+  <motion.div
+    variants={itemV}
+    style={{
+      position: "absolute",
+      bottom: "calc(46px + env(safe-area-inset-bottom))",
+    }}
+  >
+    <div
+      style={{
+        fontFamily: "'Jost',sans-serif",
+        fontWeight: 300,
+        fontSize: 11,
+        letterSpacing: "0.34em",
+        textTransform: "uppercase",
+        color: "var(--soft)",
+        animation: "hintBob 2.6s ease-in-out infinite",
+      }}
+    >
+      tap to continue
+    </div>
+  </motion.div>
+);
+
+const Tulip = ({ transform, leftLeaf, rightLeaf, brightCenter }) => (
+  <g transform={transform}>
+    <path
+      d="M30 96 L30 50"
+      stroke="#3c5a45"
+      strokeWidth="3.2"
+      fill="none"
+      strokeLinecap="round"
+    />
+    {leftLeaf && (
+      <path d="M30 72 C20 66 10 70 8 82 C22 84 29 79 30 72 Z" fill="#3c5a45" />
+    )}
+    {rightLeaf && (
+      <path d="M30 70 C40 64 50 68 52 80 C38 82 31 77 30 70 Z" fill="#34503e" />
+    )}
+    <path
+      d="M14 27 C14 15 21 8 30 8 C39 8 46 15 46 27 L46 31 C46 44 39 51 30 51 C21 51 14 44 14 31 Z"
+      fill="url(#tg)"
+    />
+    <path
+      d="M30 8 C27 8 25 17 25 28 C25 39 27 50 30 51 C33 50 35 39 35 28 C35 17 33 8 30 8 Z"
+      fill={brightCenter ? "#c5566a" : "#9e2f47"}
+      opacity={brightCenter ? 0.42 : 0.32}
+    />
+    <path
+      d="M14 28 C16 18 21 15 24 17 C22 23 22 35 24 47 C18 43 14 37 14 31 Z"
+      fill="#7e2741"
+      opacity=".28"
+    />
+    <path
+      d="M46 28 C44 18 39 15 36 17 C38 23 38 35 36 47 C42 43 46 37 46 31 Z"
+      fill="#7e2741"
+      opacity=".28"
+    />
+  </g>
+);
+
+const Bouquet = () => (
+  <div style={{ animation: "floatBob 5s ease-in-out infinite" }}>
+    <svg
+      width="148"
+      height="170"
+      viewBox="0 0 160 196"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#dc8893" />
+          <stop offset="1" stopColor="#a8324c" />
+        </linearGradient>
+      </defs>
+      <Tulip transform="translate(12,42) rotate(-13 30 30)" leftLeaf />
+      <Tulip transform="translate(82,40) rotate(12 30 30)" rightLeaf />
+      <Tulip transform="translate(47,2)" leftLeaf rightLeaf brightCenter />
+    </svg>
+  </div>
+);
+
+const Heart = () => (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.9 }}
+    animate={{ opacity: 1, scale: [0.9, 1.26, 1, 1.14, 1] }}
+    transition={{
+      opacity: { duration: 0.6, delay: 0.7 },
+      scale: {
+        duration: 1.5,
+        delay: 0.7,
+        ease: EASE,
+        times: [0, 0.18, 0.34, 0.52, 1],
+      },
+    }}
+    onAnimationStart={() => setTimeout(() => buzz([12, 46, 18]), 700)}
+    style={{ marginBottom: 28 }}
+  >
+    <svg
+      width="64"
+      height="58"
+      viewBox="0 0 64 58"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#e98a98" />
+          <stop offset="1" stopColor="#b23a52" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M32 56 C8 38 2 24 2 15 C2 6 9 2 16 2 C23 2 29 7 32 13 C35 7 41 2 48 2 C55 2 62 6 62 15 C62 24 56 38 32 56 Z"
+        fill="url(#hg)"
+        style={{ filter: "drop-shadow(0 6px 18px rgba(178,58,82,.4))" }}
+      />
+    </svg>
+  </motion.div>
+);
+
+const PRIMARY_BTN = {
+  border: "1px solid rgba(255,255,255,.8)",
+  fontWeight: 400,
+  fontSize: 16,
+  letterSpacing: ".01em",
+  color: "#7a2438",
+  padding: "15px 26px",
+  borderRadius: 999,
+  background:
+    "linear-gradient(160deg, rgba(255,247,248,.85), rgba(246,210,216,.6))",
+  boxShadow:
+    "0 10px 30px rgba(168,50,76,.2), inset 0 1px 0 rgba(255,255,255,.9)",
+  backdropFilter: "blur(14px) saturate(1.3)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.3)",
+};
+const SECONDARY_BTN = {
+  border: "1px solid rgba(255,255,255,.7)",
+  fontWeight: 400,
+  fontSize: 16,
+  letterSpacing: ".01em",
+  color: "#5a4a40",
+  padding: "15px 24px",
+  borderRadius: 999,
+  background:
+    "linear-gradient(160deg, rgba(255,255,255,.6), rgba(255,255,255,.32))",
+  boxShadow:
+    "0 8px 24px rgba(120,90,70,.14), inset 0 1px 0 rgba(255,255,255,.85)",
+  backdropFilter: "blur(14px) saturate(1.2)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.2)",
+};
+const CHIP_BTN = {
+  border: "1px solid rgba(255,255,255,.7)",
+  fontWeight: 400,
+  fontSize: 14,
+  color: "#5a4a40",
+  padding: "11px 17px",
+  borderRadius: 999,
+  background:
+    "linear-gradient(160deg, rgba(255,255,255,.58), rgba(255,255,255,.3))",
+  boxShadow:
+    "0 6px 18px rgba(120,90,70,.12), inset 0 1px 0 rgba(255,255,255,.85)",
+  backdropFilter: "blur(12px) saturate(1.2)",
+  WebkitBackdropFilter: "blur(12px) saturate(1.2)",
+};
+
+// ---- Main ------------------------------------------------------------------
+export default function CoffeeAskOut() {
+  const [scene, setScene] = useState("opening");
+  const [convince, setConvince] = useState(false);
+  const pal = PALETTE[scene];
+
+  const ambient = useMemo(() => makePetals(16, false), []);
+  const falling = useMemo(() => makePetals(95, true), []);
+  const motes = useMemo(
     () =>
-      Array.from({ length: 16 }, (_, i) => ({
-        left: Math.random() * 100,
-        size: 2 + Math.random() * 4,
-        dur: 18 + Math.random() * 20,
-        delay: -Math.random() * 30,
-        pink: i % 3 === 0,
+      Array.from({ length: 13 }, () => ({
+        position: "absolute",
+        left: rand(2, 98) + "%",
+        top: rand(4, 96) + "%",
+        width: rand(2, 5) + "px",
+        height: rand(2, 5) + "px",
+        borderRadius: "50%",
+        background:
+          "radial-gradient(circle, rgba(255,240,210,.9), rgba(255,220,170,0))",
+        opacity: rand(0.15, 0.5),
+        animation: `mote ${rand(7, 15).toFixed(2)}s ease-in-out ${(-rand(0, 10)).toFixed(2)}s infinite`,
       })),
     [],
   );
+
+  const go = (s) => {
+    buzz(14);
+    setScene(s);
+  };
+  const onStageTap = () => {
+    if (scene === "opening") go("tulips");
+    else if (scene === "tulips") go("ask");
+  };
+
   return (
     <div
-      aria-hidden
+      onClick={onStageTap}
       style={{
         position: "fixed",
         inset: 0,
         overflow: "hidden",
-        zIndex: 0,
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: "-15%",
-          left: "-12%",
-          width: 460,
-          height: 460,
-          borderRadius: "50%",
-          background:
-            "radial-gradient(circle, rgba(96,165,250,0.20), transparent 70%)",
-          animation: "driftA 26s ease-in-out infinite alternate",
-          willChange: "transform",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          bottom: "-20%",
-          right: "-14%",
-          width: 520,
-          height: 520,
-          borderRadius: "50%",
-          background:
-            "radial-gradient(circle, rgba(249,168,212,0.15), transparent 70%)",
-          animation: "driftB 32s ease-in-out infinite alternate",
-          willChange: "transform",
-        }}
-      />
-      {particles.map((p, i) => (
-        <span
-          key={i}
-          style={{
-            position: "absolute",
-            bottom: -10,
-            left: `${p.left}%`,
-            width: p.size,
-            height: p.size,
-            borderRadius: "50%",
-            background: p.pink ? C.pink : C.accent,
-            opacity: 0.5,
-            boxShadow: `0 0 ${p.size * 2}px ${p.pink ? C.pink : C.accent}`,
-            willChange: "transform, opacity",
-            animation: `particleRise ${p.dur}s linear ${p.delay}s infinite`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-const Heart = ({ size = 92, beat = true, glow = true }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    aria-hidden
-    style={{
-      animation: beat ? "heartbeat 2.4s ease-in-out infinite" : "none",
-      willChange: beat ? "transform" : "auto",
-      filter: glow ? `drop-shadow(0 0 20px rgba(249,168,212,.55))` : "none",
-    }}
-  >
-    <defs>
-      <linearGradient id="hg" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor={C.pink} />
-        <stop offset="100%" stopColor={C.accent} />
-      </linearGradient>
-    </defs>
-    <path
-      fill="url(#hg)"
-      d="M12 21s-7.2-4.6-9.6-9.2C.9 8.3 2.5 5 5.7 5c2 0 3.4 1.2 4.3 2.6C10.9 6.2 12.3 5 14.3 5c3.2 0 4.8 3.3 3.3 6.8C19.2 16.4 12 21 12 21z"
-    />
-  </svg>
-);
-
-const Section = ({ children, style = {}, ...rest }) => (
-  <section
-    {...rest}
-    style={{
-      position: "relative",
-      zIndex: 1,
-      maxWidth: 860,
-      margin: "0 auto",
-      padding: "clamp(72px, 14vh, 120px) clamp(22px, 6vw, 24px)",
-      ...style,
-    }}
-  >
-    {children}
-  </section>
-);
-
-const H = ({ children, style = {} }) => (
-  <h2
-    style={{
-      fontFamily: "'Playfair Display', serif",
-      fontWeight: 700,
-      color: C.text,
-      fontSize: "clamp(2.1rem, 8vw, 3.6rem)",
-      lineHeight: 1.12,
-      letterSpacing: "-0.01em",
-      margin: 0,
-      textWrap: "balance",
-      ...style,
-    }}
-  >
-    {children}
-  </h2>
-);
-
-// Pressable button with tactile scale-down on touch.
-function Pressable({ children, onClick, ariaLabel, gradient, shadow }) {
-  const [down, setDown] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      aria-label={ariaLabel}
-      onPointerDown={() => setDown(true)}
-      onPointerUp={() => setDown(false)}
-      onPointerLeave={() => setDown(false)}
-      style={{
-        marginTop: 44,
-        padding: "16px 50px",
-        minHeight: 52,
-        borderRadius: 999,
-        border: "none",
-        cursor: "pointer",
-        fontFamily: "Inter",
-        fontSize: "1.05rem",
-        fontWeight: 500,
-        color: "#0F172A",
-        background: gradient,
-        boxShadow: shadow,
-        touchAction: "manipulation",
-        transform: down ? "scale(0.96)" : "scale(1)",
-        transition: "transform .18s cubic-bezier(.22,1,.36,1), filter .2s ease",
-        filter: down ? "brightness(1.05)" : "none",
-        WebkitUserSelect: "none",
         userSelect: "none",
+        WebkitTapHighlightColor: "transparent",
+        fontFamily: "'Jost',sans-serif",
+        background: pal.bg,
+        transition: "background 1.4s cubic-bezier(.4,0,.2,1)",
+        ["--ink"]: pal.ink,
+        ["--soft"]: pal.soft,
+        ["--accent"]: pal.accent,
+        paddingTop: "env(safe-area-inset-top)",
+        paddingRight: "env(safe-area-inset-right)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+        paddingLeft: "env(safe-area-inset-left)",
       }}
     >
-      {children}
-    </button>
-  );
-}
+      <style>{KEYFRAMES}</style>
 
-function Letter() {
-  const [open, setOpen] = useState(false);
-  const [down, setDown] = useState(false);
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 28,
-      }}
-    >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        onPointerDown={() => setDown(true)}
-        onPointerUp={() => setDown(false)}
-        onPointerLeave={() => setDown(false)}
-        aria-expanded={open}
-        aria-label={open ? "Close the letter" : "Open the letter"}
-        style={{
-          position: "relative",
-          width: "min(260px, 72vw)",
-          height: 168,
-          cursor: "pointer",
-          border: "none",
-          background: "transparent",
-          touchAction: "manipulation",
-          WebkitUserSelect: "none",
-          userSelect: "none",
-          transform: down ? "scale(0.97)" : "scale(1)",
-          transition: "transform .2s cubic-bezier(.22,1,.36,1)",
-          animation: open || down ? "none" : "floatUp 4s ease-in-out infinite",
-          willChange: "transform",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: 16,
-            ...glass,
-            background:
-              "linear-gradient(160deg, rgba(96,165,250,.25), rgba(249,168,212,.18))",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: "50%",
-            width: 0,
-            height: 0,
-            marginLeft: -130,
-            borderLeft: "130px solid transparent",
-            borderRight: "130px solid transparent",
-            borderTop: `82px solid rgba(148,163,184,${open ? 0 : 0.35})`,
-            transformOrigin: "top",
-            transform: open ? "rotateX(180deg)" : "rotateX(0deg)",
-            transition: "all .6s ease",
-            borderRadius: 4,
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <Heart size={34} beat={false} glow />
-        </div>
-        <span
-          style={{
-            position: "absolute",
-            bottom: 14,
-            left: 0,
-            right: 0,
-            color: C.sub,
-            fontSize: 13,
-            fontFamily: "Inter",
-          }}
-        >
-          {open ? "Tap to close" : "Tap to open"}
-        </span>
-      </button>
-
+      {/* Floating blurred orbs */}
       <div
+        className="cao-orb"
         style={{
-          maxHeight: open ? 600 : 0,
-          opacity: open ? 1 : 0,
-          overflow: "hidden",
-          transition:
-            "max-height .9s cubic-bezier(.22,1,.36,1), opacity .7s ease",
-          width: "100%",
+          position: "absolute",
+          top: -60,
+          left: -44,
+          width: 260,
+          height: 260,
+          borderRadius: "50%",
+          background:
+            "radial-gradient(circle, rgba(243,220,174,.5), transparent 70%)",
+          filter: "blur(46px)",
+          animation: "orbFloat 16s ease-in-out infinite",
+          pointerEvents: "none",
         }}
-      >
-        <div
-          style={{
-            ...glass,
-            padding: "clamp(28px,7vw,40px) clamp(24px,6vw,34px)",
-            maxWidth: 560,
-            margin: "0 auto",
-          }}
-        >
-          {[
-            "No matter what happens, I wanted to say this properly.",
-            // "Thank you for being part of my life.",
-            "You matter to me.",
-            "And I truly am sorry.",
-          ].map((l, i) => (
-            <p
-              key={i}
-              style={{
-                fontFamily: "'Playfair Display', serif",
-                fontStyle: "italic",
-                fontSize: "clamp(1.15rem,4.5vw,1.5rem)",
-                color: C.text,
-                lineHeight: 1.6,
-                margin: "0 0 14px",
-                textAlign: "center",
-              }}
-            >
-              {l}
-            </p>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+      />
+      <div
+        className="cao-orb"
+        style={{
+          position: "absolute",
+          bottom: -72,
+          right: -52,
+          width: 300,
+          height: 300,
+          borderRadius: "50%",
+          background:
+            "radial-gradient(circle, rgba(244,201,210,.45), transparent 70%)",
+          filter: "blur(52px)",
+          animation: "orbFloat 20s ease-in-out -4s infinite",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        className="cao-orb"
+        style={{
+          position: "absolute",
+          top: "40%",
+          right: -86,
+          width: 220,
+          height: 220,
+          borderRadius: "50%",
+          background:
+            "radial-gradient(circle, rgba(188,208,191,.34), transparent 70%)",
+          filter: "blur(50px)",
+          animation: "orbFloat 22s ease-in-out -8s infinite",
+          pointerEvents: "none",
+        }}
+      />
 
-function Stars() {
-  const stars = React.useMemo(
-    () =>
-      Array.from({ length: 55 }, () => ({
-        top: Math.random() * 100,
-        left: Math.random() * 100,
-        s: Math.random() * 2 + 0.5,
-        dur: 2 + Math.random() * 4,
-        delay: Math.random() * 4,
-      })),
-    [],
-  );
-  const [ref, shown] = useReveal();
-  return (
-    <div
-      ref={ref}
-      style={{
-        position: "relative",
-        height: "clamp(340px, 52vh, 420px)",
-        borderRadius: 26,
-        overflow: "hidden",
-        background: "linear-gradient(180deg,#0B1120,#1E293B)",
-        border: "1px solid rgba(148,163,184,.15)",
-      }}
-    >
-      {stars.map((st, i) => (
-        <span
-          key={i}
-          style={{
-            position: "absolute",
-            top: `${st.top}%`,
-            left: `${st.left}%`,
-            width: st.s,
-            height: st.s,
-            borderRadius: "50%",
-            background: "#fff",
-            willChange: "opacity",
-            animation: `twinkle ${st.dur}s ease-in-out ${st.delay}s infinite`,
-          }}
-        />
-      ))}
+      {/* Film grain */}
       <div
         style={{
           position: "absolute",
           inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "clamp(24px,7vw,40px)",
-          opacity: shown ? 1 : 0,
-          transition: "opacity 1.6s ease",
+          pointerEvents: "none",
+          opacity: 0.05,
+          mixBlendMode: "overlay",
+          backgroundSize: "120px",
+          backgroundImage: GRAIN,
         }}
-      >
-        <p
-          style={{
-            fontFamily: "'Playfair Display', serif",
-            fontStyle: "italic",
-            textAlign: "center",
-            fontSize: "clamp(1.35rem,5.5vw,2.1rem)",
-            color: C.text,
-            maxWidth: 540,
-            lineHeight: 1.4,
-            margin: 0,
-            textShadow: "0 0 24px rgba(96,165,250,.4)",
-            textWrap: "balance",
-          }}
-        >
-          “Some people become important chapters in our lives.”
-        </p>
+      />
+
+      {/* Drifting motes */}
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        {motes.map((s, i) => (
+          <div key={i} className="cao-mote" style={s} />
+        ))}
       </div>
-    </div>
-  );
-}
 
-function GlassCard({ children, delay = 0, touch }) {
-  const [active, setActive] = useState(false);
-  // On touch we use a brief press-lift; on desktop, hover-lift.
-  const handlers = touch
-    ? {
-        onPointerDown: () => setActive(true),
-        onPointerUp: () => setActive(false),
-        onPointerLeave: () => setActive(false),
-      }
-    : {
-        onMouseEnter: () => setActive(true),
-        onMouseLeave: () => setActive(false),
-      };
-  return (
-    <Reveal delay={delay}>
-      <div
-        {...handlers}
-        style={{
-          ...glass,
-          padding: "clamp(24px,6vw,30px) clamp(22px,5vw,26px)",
-          height: "100%",
-          transform: active ? "translate3d(0,-6px,0)" : "translate3d(0,0,0)",
-          boxShadow: active
-            ? "0 18px 50px rgba(96,165,250,.18)"
-            : "0 6px 20px rgba(0,0,0,.25)",
-          transition:
-            "transform .35s cubic-bezier(.22,1,.36,1), box-shadow .35s ease",
-          touchAction: "manipulation",
-        }}
-      >
-        {children}
-      </div>
-    </Reveal>
-  );
-}
-
-export default function ApologyApp() {
-  useGlobalStyles();
-  const touch = useTouch();
-  const [entered, setEntered] = useState(false);
-  const [showOpen, setShowOpen] = useState(false);
-  const [thanked, setThanked] = useState(false);
-  const startRef = useRef(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => setShowOpen(true), 1000);
-    return () => clearTimeout(t);
-  }, []);
-
-  const enter = useCallback(() => {
-    setEntered(true);
-    setTimeout(
-      () =>
-        startRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        }),
-      60,
-    );
-  }, []);
-
-  const understand = [
-    "I understand that my actions affected your feelings.",
-    "I understand that trust takes time to rebuild.",
-    "I understand that apologies mean nothing without change.",
-  ];
-  // Replace these with your own — example text shows as a fallback until you do.
-  const memories = [
-    "{{MEMORY_1}}",
-    "{{MEMORY_2}}",
-    "{{MEMORY_3}}",
-    "{{MEMORY_4}}",
-    "{{MEMORY_5}}",
-  ];
-  const memoryFallback = [
-    "Your kindness.",
-    "The way you always listen to me",
-    "The conversations we shared.",
-    "The crazy you offer",
-    "The way you make me laugh",
-  ];
-  const timeline = [
-    "The day we started talking",
-    "A difficult moment we overcame(this one if we do)",
-    "Today",
-  ];
-  const changes = [
-    "Listen better.",
-    "Communicate honestly.",
-    "Respect your feelings.",
-    "Learn from my mistakes.",
-    "Let actions speak louder than words.",
-  ];
-
-  return (
-    <div
-      style={{
-        fontFamily: "'Inter', system-ui, sans-serif",
-        background: C.bg,
-        color: C.text,
-        minHeight: "100vh",
-        overflowX: "hidden",
-        position: "relative",
-        WebkitOverflowScrolling: "touch",
-        paddingLeft: "var(--safe-l)",
-        paddingRight: "var(--safe-r)",
-      }}
-    >
-      <Ambient />
-
-      {/* Landing — uses 100svh so it fits exactly between Dynamic Island and home bar */}
-      <main
-        style={{
-          position: "relative",
-          zIndex: 1,
-          minHeight: "100svh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "calc(var(--safe-t) + 24px) 24px calc(var(--safe-b) + 24px)",
-          textAlign: "center",
-        }}
-      >
-        <Reveal y={18}>
-          <div style={{ marginBottom: 30 }}>
-            <Heart />
-          </div>
-        </Reveal>
-        <Reveal delay={0.15} y={18}>
-          <h1
-            style={{
-              fontFamily: "'Playfair Display', serif",
-              fontWeight: 700,
-              fontSize: "clamp(2.3rem,9vw,4.2rem)",
-              margin: "0 0 18px",
-              letterSpacing: "-0.02em",
-              textWrap: "balance",
-            }}
+      <AnimatePresence>
+        {scene === "opening" && (
+          <motion.div
+            key="opening"
+            variants={groupV(0.6, 1.45)}
+            initial="hidden"
+            animate="show"
+            exit={{ opacity: 0, transition: { duration: 0.8 } }}
+            style={sceneWrap}
           >
-            I Made This For You <span style={{ color: C.pink }}>❤️</span>
-          </h1>
-        </Reveal>
-        <Reveal delay={0.3} y={18}>
-          <p
-            style={{
-              color: C.sub,
-              fontSize: "clamp(1rem,4vw,1.3rem)",
-              fontWeight: 300,
-              margin: 0,
-            }}
-          >
-            Because a simple text never felt enough.
-          </p>
-        </Reveal>
-        <div
-          style={{
-            opacity: showOpen ? 1 : 0,
-            transform: showOpen
-              ? "translate3d(0,0,0)"
-              : "translate3d(0,14px,0)",
-            transition: "opacity .9s ease, transform .9s ease",
-            pointerEvents: showOpen ? "auto" : "none",
-          }}
-        >
-          <Pressable
-            onClick={enter}
-            ariaLabel="Open"
-            gradient={`linear-gradient(135deg, ${C.accent}, ${C.pink})`}
-            shadow="0 10px 30px rgba(96,165,250,.35)"
-          >
-            Open
-          </Pressable>
-        </div>
-      </main>
-
-      <div
-        ref={startRef}
-        style={{
-          opacity: entered ? 1 : 0.001,
-          transition: "opacity 1.2s ease",
-          pointerEvents: entered ? "auto" : "none",
-        }}
-        aria-hidden={!entered}
-      >
-        {/* 1 — Apology */}
-        <Section>
-          <Reveal>
-            <H>I'm Sorry.</H>
-          </Reveal>
-          <div
-            style={{
-              marginTop: 36,
-              display: "flex",
-              flexDirection: "column",
-              gap: 22,
-            }}
-          >
-            {[
-              "I know I hurt you.",
-              "I know words alone cannot undo what happened.",
-              "I am not here to make excuses or ask you to forget everything immediately.",
-              "I simply want to acknowledge my mistake, take responsibility, and tell you how deeply sorry I am.",
-              "You deserved better from me.",
-            ].map((p, i) => (
-              <Reveal key={i} delay={i * 0.08}>
-                <p
-                  style={{
-                    fontSize: "clamp(1.1rem,4vw,1.35rem)",
-                    lineHeight: 1.7,
-                    color: C.sub,
-                    fontWeight: 300,
-                    margin: 0,
-                  }}
-                >
-                  {p}
-                </p>
-              </Reveal>
-            ))}
-          </div>
-        </Section>
-
-        {/* 2 — What I understand now */}
-        <Section>
-          <Reveal>
-            <H>What I Understand Now</H>
-          </Reveal>
-          <div
-            style={{
-              marginTop: 44,
-              display: "grid",
-              gap: 20,
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
-            }}
-          >
-            {understand.map((t, i) => (
-              <GlassCard key={i} delay={i * 0.12} touch={touch}>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "1.12rem",
-                    lineHeight: 1.6,
-                    color: C.text,
-                    fontWeight: 400,
-                  }}
-                >
-                  {t}
-                </p>
-              </GlassCard>
-            ))}
-          </div>
-        </Section>
-
-        {/* 3 — Things I appreciate */}
-        <Section>
-          <Reveal>
-            <H>Things I Appreciate About You</H>
-          </Reveal>
-          <div
-            style={{
-              marginTop: 44,
-              display: "grid",
-              gap: 18,
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-            }}
-          >
-            {memories.map((m, i) => {
-              const text = m.startsWith("{{") ? memoryFallback[i] : m;
-              return (
-                <GlassCard key={i} delay={i * 0.12} touch={touch}>
-                  <Heart size={26} beat={false} glow={false} />
-                  <p
-                    style={{
-                      margin: "12px 0 0",
-                      fontSize: "1.1rem",
-                      lineHeight: 1.5,
-                      fontStyle: "italic",
-                      color: C.text,
-                    }}
-                  >
-                    {text}
-                  </p>
-                </GlassCard>
-              );
-            })}
-          </div>
-        </Section>
-
-        {/* 4 — Timeline */}
-        <Section>
-          <Reveal>
-            <H>Our Timeline</H>
-          </Reveal>
-          <div style={{ marginTop: 48, position: "relative", paddingLeft: 8 }}>
             <div
               style={{
                 position: "absolute",
-                left: 19,
-                top: 6,
-                bottom: 6,
-                width: 2,
-                background: `linear-gradient(${C.accent}, ${C.pink})`,
-                opacity: 0.4,
+                width: 220,
+                height: 220,
+                borderRadius: "50%",
+                background:
+                  "radial-gradient(circle, rgba(245,220,170,.5) 0%, rgba(231,201,143,.1) 42%, transparent 70%)",
+                filter: "blur(4px)",
+                animation: "corePulse 4.6s ease-in-out infinite",
+                pointerEvents: "none",
               }}
             />
-            <div style={{ display: "flex", flexDirection: "column", gap: 30 }}>
-              {timeline.map((t, i) => (
-                <Reveal key={i} delay={i * 0.14} y={18}>
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 18 }}
-                  >
-                    <span
-                      style={{
-                        flex: "0 0 auto",
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        display: "grid",
-                        placeItems: "center",
-                        fontSize: 18,
-                        ...glass,
-                        boxShadow: `0 0 18px rgba(96,165,250,.45)`,
-                      }}
-                    >
-                      🌸
-                    </span>
-                    <div
-                      style={{
-                        ...glass,
-                        padding: "16px 20px",
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    >
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: "clamp(1rem,3.6vw,1.1rem)",
-                          color: C.text,
-                        }}
-                      >
-                        {t}
-                      </p>
-                    </div>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </Section>
-
-        {/* 5 — What I'll do differently */}
-        <Section>
-          <Reveal>
-            <H>What I Will Do Differently</H>
-          </Reveal>
-          <div
-            style={{
-              marginTop: 40,
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-            }}
-          >
-            {changes.map((c, i) => (
-              <Reveal key={i} delay={i * 0.1}>
-                <div
-                  style={{
-                    ...glass,
-                    padding: "18px 22px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 16,
-                  }}
-                >
-                  <svg
-                    width="26"
-                    height="26"
-                    viewBox="0 0 24 24"
-                    aria-hidden
-                    style={{ flex: "0 0 auto" }}
-                  >
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="11"
-                      fill="none"
-                      stroke={C.accent}
-                      strokeWidth="1.5"
-                      opacity="0.5"
-                    />
-                    <path
-                      d="M7 12.5l3.2 3.2L17 8.5"
-                      fill="none"
-                      stroke={C.pink}
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeDasharray="20"
-                      strokeDashoffset="20"
-                      style={{
-                        animation: "dash 1s ease forwards",
-                        animationDelay: `${0.3 + i * 0.12}s`,
-                      }}
-                    />
-                  </svg>
-                  <span
-                    style={{
-                      fontSize: "clamp(1.02rem,3.8vw,1.12rem)",
-                      color: C.text,
-                    }}
-                  >
-                    {c}
-                  </span>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </Section>
-
-        {/* 6 — Letter */}
-        <Section>
-          <Reveal style={{ textAlign: "center" }}>
-            <H style={{ marginBottom: 40 }}>A Letter</H>
-          </Reveal>
-          <Letter />
-        </Section>
-
-        {/* 7 — Starry night */}
-        <Section>
-          <Reveal>
-            <Stars />
-          </Reveal>
-        </Section>
-
-        {/* Final */}
-        <Section
-          style={{
-            textAlign: "center",
-            paddingBottom: "calc(var(--safe-b) + 140px)",
-          }}
-        >
-          <Reveal>
-            <H>No Pressure.</H>
-          </Reveal>
-          <div
-            style={{
-              marginTop: 32,
-              display: "flex",
-              flexDirection: "column",
-              gap: 18,
-              alignItems: "center",
-            }}
-          >
-            {[
-              "I am not asking for an immediate response.",
-              "Take all the time you need.",
-              "Whatever you decide, I will respect it.",
-              "I simply wanted to tell you this from my heart.",
-            ].map((p, i) => (
-              <Reveal key={i} delay={i * 0.08}>
-                <p
-                  style={{
-                    fontSize: "clamp(1.05rem,4vw,1.3rem)",
-                    color: C.sub,
-                    fontWeight: 300,
-                    margin: 0,
-                    maxWidth: 560,
-                  }}
-                >
-                  {p}
-                </p>
-              </Reveal>
-            ))}
-          </div>
-
-          {!thanked ? (
-            <Pressable
-              onClick={() => setThanked(true)}
-              ariaLabel="Thank you for reading"
-              gradient={`linear-gradient(135deg, ${C.pink}, ${C.accent})`}
-              shadow="0 10px 30px rgba(249,168,212,.35)"
+            <div
+              style={{
+                position: "absolute",
+                width: 9,
+                height: 9,
+                borderRadius: "50%",
+                background: "radial-gradient(circle,#fff,#f0d9a6)",
+                boxShadow: "0 0 18px 6px rgba(245,220,170,.6)",
+                animation: "corePulse 4.6s ease-in-out infinite",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                gap: 24,
+              }}
             >
-              Thank You For Reading ❤️
-            </Pressable>
-          ) : (
-            <div style={{ marginTop: 48, position: "relative" }}>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <span
-                  key={i}
-                  style={{
-                    position: "absolute",
-                    left: `${(i / 12) * 100 - 50}%`,
-                    bottom: 0,
-                    fontSize: 12 + Math.random() * 14,
-                    willChange: "transform, opacity",
-                    animation: `heartRise ${4 + Math.random() * 3}s ease-in ${Math.random() * 2}s infinite`,
-                  }}
-                >
-                  ❤️
-                </span>
-              ))}
-              <p
+              <motion.div
+                variants={itemV}
                 style={{
-                  fontFamily: "'Playfair Display', serif",
-                  fontSize: "clamp(1.3rem,5vw,1.9rem)",
-                  color: C.text,
-                  margin: 0,
-                  animation: "floatUp 4s ease-in-out infinite",
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontWeight: 500,
+                  fontSize: 32,
+                  lineHeight: 1.32,
+                  color: "var(--ink)",
                 }}
               >
-                Thank you for giving my words your time.
-              </p>
+                Okay, hear me out.
+              </motion.div>
+              <motion.div
+                variants={itemV}
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontWeight: 500,
+                  fontSize: 32,
+                  lineHeight: 1.32,
+                  color: "var(--ink)",
+                }}
+              >
+                I made you a whole website.
+              </motion.div>
+              <motion.div
+                variants={itemV}
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontStyle: "italic",
+                  fontWeight: 400,
+                  fontSize: 25,
+                  lineHeight: 1.4,
+                  color: "var(--soft)",
+                }}
+              >
+                Yes, instead of just texting like a normal person.
+              </motion.div>
             </div>
-          )}
-        </Section>
-      </div>
+            <Hint />
+          </motion.div>
+        )}
+
+        {scene === "tulips" && (
+          <motion.div
+            key="tulips"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: 0.9 } }}
+            exit={{ opacity: 0, transition: { duration: 0.8 } }}
+            style={{ position: "absolute", inset: 0 }}
+          >
+            <PetalField petals={ambient} />
+            <motion.div
+              variants={groupV(0.5, 0.9)}
+              initial="hidden"
+              animate="show"
+              style={{ ...sceneWrap, padding: "0 38px", pointerEvents: "none" }}
+            >
+              <motion.div
+                variants={itemV}
+                style={{
+                  fontFamily: "'Caveat',cursive",
+                  fontWeight: 600,
+                  fontSize: 44,
+                  lineHeight: 1.2,
+                  color: "var(--accent)",
+                  maxWidth: 320,
+                }}
+              >
+                These cost me nothing and everything.
+              </motion.div>
+              <motion.div
+                variants={itemV}
+                style={{
+                  marginTop: 20,
+                  fontFamily: "'Jost',sans-serif",
+                  fontWeight: 300,
+                  fontSize: 14.5,
+                  letterSpacing: ".02em",
+                  color: "var(--soft)",
+                }}
+              >
+                they're digital. but the effort is real.
+              </motion.div>
+              <Hint />
+            </motion.div>
+          </motion.div>
+        )}
+
+        {scene === "ask" && (
+          <motion.div
+            key="ask"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: 0.9 } }}
+            exit={{ opacity: 0, transition: { duration: 0.8 } }}
+            style={sceneWrap}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 42 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1.7, delay: 0.15, ease: EASE }}
+              style={{ marginBottom: 30 }}
+            >
+              <Bouquet />
+            </motion.div>
+
+            <motion.div
+              variants={groupV(0.75, 1.0)}
+              initial="hidden"
+              animate="show"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+              }}
+            >
+              <motion.div
+                variants={itemV}
+                style={{
+                  fontFamily: "'Caveat',cursive",
+                  fontWeight: 600,
+                  fontSize: 42,
+                  lineHeight: 1,
+                  color: "var(--accent)",
+                }}
+              >
+                So…
+              </motion.div>
+              <motion.div
+                variants={itemV}
+                style={{
+                  marginTop: 14,
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontStyle: "italic",
+                  fontWeight: 500,
+                  fontSize: 30,
+                  lineHeight: 1.3,
+                  color: "var(--ink)",
+                  maxWidth: 300,
+                }}
+              >
+                Coffee? Before I overthink this any more?
+              </motion.div>
+              <motion.div
+                variants={itemV}
+                style={{
+                  marginTop: 36,
+                  display: "flex",
+                  gap: 14,
+                  alignItems: "center",
+                }}
+              >
+                <MagneticButton
+                  onClick={() => go("ending")}
+                  style={PRIMARY_BTN}
+                  sheenOpacity={0.55}
+                >
+                  Yes&nbsp;❤️
+                </MagneticButton>
+                <MagneticButton
+                  onClick={() => {
+                    buzz(8);
+                    setConvince(true);
+                  }}
+                  hidden={convince}
+                  style={SECONDARY_BTN}
+                  sheenOpacity={0.45}
+                >
+                  Convince me&nbsp;😏
+                </MagneticButton>
+              </motion.div>
+            </motion.div>
+
+            <AnimatePresence>
+              {convince && (
+                <motion.div
+                  key="convince"
+                  variants={groupV(0.25, 0.78)}
+                  initial="hidden"
+                  animate="show"
+                  style={{
+                    marginTop: 26,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 14,
+                    maxWidth: 330,
+                  }}
+                >
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      fontFamily: "'Cormorant Garamond',serif",
+                      fontStyle: "italic",
+                      fontSize: 21,
+                      lineHeight: 1.3,
+                      color: "var(--ink)",
+                    }}
+                  >
+                    I'm funnier in person. Allegedly.
+                  </motion.div>
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      fontFamily: "'Cormorant Garamond',serif",
+                      fontStyle: "italic",
+                      fontSize: 21,
+                      lineHeight: 1.3,
+                      color: "var(--ink)",
+                    }}
+                  >
+                    I already did the hard part — look at this thing.
+                  </motion.div>
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      fontFamily: "'Cormorant Garamond',serif",
+                      fontStyle: "italic",
+                      fontSize: 21,
+                      lineHeight: 1.3,
+                      color: "var(--ink)",
+                    }}
+                  >
+                    Worst case: free coffee and a story.
+                  </motion.div>
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      marginTop: 4,
+                      fontFamily: "'Caveat',cursive",
+                      fontWeight: 600,
+                      fontSize: 34,
+                      lineHeight: 1,
+                      color: "var(--accent)",
+                    }}
+                  >
+                    So… we good?
+                  </motion.div>
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      marginTop: 8,
+                      fontFamily: "'Cormorant Garamond',serif",
+                      fontStyle: "italic",
+                      fontSize: 16,
+                      lineHeight: 1.4,
+                      color: "var(--soft)",
+                    }}
+                  >
+                    or, if coffee's too on-the-nose —
+                  </motion.div>
+                  <motion.div
+                    variants={itemV}
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      justifyContent: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <MagneticButton
+                      onClick={() => go("ending")}
+                      style={CHIP_BTN}
+                      sheenOpacity={0.45}
+                    >
+                      🏺&nbsp;Pottery
+                    </MagneticButton>
+                    <MagneticButton
+                      onClick={() => go("ending")}
+                      style={CHIP_BTN}
+                      sheenOpacity={0.45}
+                    >
+                      🤸&nbsp;Trampoline&nbsp;park
+                    </MagneticButton>
+                    <MagneticButton
+                      onClick={() => go("ending")}
+                      style={CHIP_BTN}
+                      sheenOpacity={0.45}
+                    >
+                      ✨&nbsp;Dealer's&nbsp;choice
+                    </MagneticButton>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+
+        {scene === "ending" && (
+          <motion.div
+            key="ending"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: 1.0 } }}
+            style={{ position: "absolute", inset: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 2.2, delay: 0.1 }}
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "radial-gradient(120% 100% at 50% 42%, rgba(255,228,168,.55) 0%, rgba(247,219,178,.16) 45%, transparent 76%)",
+                pointerEvents: "none",
+              }}
+            />
+            <PetalField petals={falling} />
+            <div style={{ ...sceneWrap, pointerEvents: "none" }}>
+              <Heart />
+              <motion.div
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 1.6, delay: 1.55, ease: EASE }}
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontStyle: "italic",
+                  fontWeight: 500,
+                  fontSize: 38,
+                  lineHeight: 1.2,
+                  color: "var(--ink)",
+                }}
+              >
+                Knew you had taste.
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
